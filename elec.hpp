@@ -5,34 +5,47 @@
 #include<stdexcept>
 #include<print>
 #include<iostream>
+#include<chrono>
 
 //bit位，便于抽象
 class Bit {
 private:
 	bool value = 0;
-
+	bool IsHighImpedance = false;
 public:
 	Bit() = default;
 	Bit(bool v) :value(v) { }
-	bool operator = (bool v) {
+	bool operator = (int v) {
+		if (v == -1) {
+			IsHighImpedance = true;
+			return false;
+		}
 		value = v;
 		return value;
 	}
 
 	operator int() const {
+		if (IsHighImpedance) return -1;
 		return value ? 1 : 0;
 	}
 
+	bool isHighZ() const { return IsHighImpedance; }
+	bool isOne() const { return !IsHighImpedance && value; }
+	bool isZero() const { return !IsHighImpedance && !value; }
+
 	Bit operator !() const {
+		if (IsHighImpedance)return *this;
 		return !value;
 	}
 
 	Bit operator &(const Bit& bit)const {
+		if (IsHighImpedance)return *this;
 		return value & bit.value;
 	}
 
 
 	Bit operator |(const Bit& bit)const {
+		if (IsHighImpedance)return *this;
 		return value | bit.value;
 	}
 };
@@ -41,8 +54,45 @@ public:
 class Unit {
 	friend class circuit;
 protected:
-	std::vector<Bit*> Inputs;
-	std::vector<Bit*> Outputs;
+	class Node {
+	public:
+		std::vector<Bit*> Inputs;
+		Bit* Output;
+
+		Node() :Output(new Bit()) {}
+		Node(const Node& others) {
+			for (auto& input : others.Inputs) {
+				Inputs.push_back(input);
+			}
+			Output = others.Output;
+		}
+		Bit& Value() {
+			if (Inputs.empty()) {
+				return *Output;
+			}
+			if (!Output) {
+				throw std::runtime_error("Null pointer in Outputs");
+			}
+			//这里可以添加一些逻辑来计算输出值，或者直接返回输出指针
+			Bit Value = false;
+			for (auto& input : Inputs) {
+				if (!input) {
+					throw std::runtime_error("Null pointer in Inputs");
+				}
+				if (input->isHighZ()) continue;
+				Value = Value | *input;
+			}
+			*Output = Value;
+			return *Output;
+		}
+
+		void Connect(Bit* bit) {
+			Inputs.push_back(bit);
+		}
+	};
+
+	std::vector<Node> Inputs;
+	std::vector<Node> Outputs;
 	std::vector<Unit*> Requires;
 
 	void SetInput(size_t InputIndex, Unit* _unit, size_t _InputIndex) {
@@ -55,12 +105,9 @@ protected:
 public:
 	Unit(size_t inputCount, size_t outputCount) {
 		Inputs.resize(inputCount);
-		for (auto& p : Inputs) p = new Bit();
-
 		Outputs.resize(outputCount);
-		for (auto& p : Outputs) p = new Bit();
 	}
-
+	virtual bool isSequential() const { return false; }
 	//必须实现的函数，执行单元的逻辑
 	virtual void Do() {}
 
@@ -68,24 +115,18 @@ public:
 		if (index >= Inputs.size()) {
 			throw std::out_of_range("Input index out of range");
 		}
-		if (!Inputs[index]) {
-			throw std::runtime_error("Null pointer in Inputs");
-		}
-		return *Inputs[index];
+		return Inputs[index].Value();
 	}
 
 	Bit& Output(size_t index) {
 		if (index >= Outputs.size()) {
 			throw std::out_of_range("Input index out of range");
 		}
-		if (!Outputs[index]) {
-			throw std::runtime_error("Null pointer in Inputs");
-		}
-		return *Outputs[index];
+		return Outputs[index].Value();
 	}
 
 	void Connect(size_t outputIndex, Unit* other, size_t inputIndex) {
-		other->Inputs[inputIndex] = Outputs[outputIndex];
+		other->Inputs[inputIndex].Connect(Outputs[outputIndex].Output);
 		if (std::find(other->Requires.begin(), other->Requires.end(), this) == other->Requires.end())
 			other->Requires.push_back(this);
 	}
@@ -104,10 +145,14 @@ public:
 	}
 };
 
-//信号源,未实现
-class Source : public Unit {
+//信号源
+class Clock : public Unit {
 public:
+	Clock() : Unit(0, 1) {}
 
+	void Do() override {
+		Output(0) = !Output(0);
+	}
 };
 
 //手动输入
@@ -122,6 +167,14 @@ public:
 			std::cin >> value;
 			Output(i) = value;
 		}
+	}
+};
+
+class PullUp : public Unit {
+public:
+	PullUp() : Unit(0, 1) {}          // 无输入，一个输出
+	void Do() override {
+		Output(0) = 1;                 // 固定输出 1（可改为 0 作为下拉）
 	}
 };
 
@@ -148,7 +201,7 @@ class NotGate : public Unit {
 	NotGate() :Unit(1, 1) {}
 
 	void Do() override {
-		Output(0) = Input(0);
+		Output(0) = !Input(0);
 	}
 };
 
@@ -160,25 +213,79 @@ public:
 	}
 };
 
+//特殊单元
+//1位存储单元
+class StoreUnit : public Unit {
+private:
+	Bit bit;//存储1位数据
+public:
+	StoreUnit() : Unit(2, 1) {}// （读写,数据）
+
+	void Do() override {
+		if (int(Input(0)) == 1) {
+			bit = Input(1);
+		}
+		Output(0) = bit;
+	}
+};
+
+//边沿触发的寄存器
+class DFlipFlop : public Unit {
+	Bit q;
+	bool lastClock = false;
+public:
+	virtual bool isSequential() const { return true; }
+	DFlipFlop() : Unit(2, 1) {} // 输入：D, CLK
+	void Do() override {
+		bool clk = (Input(1) == 1);
+		if (!lastClock && clk) {       // 上升沿检测
+			q = Input(0);               // 采样 D
+		}
+		lastClock = clk;
+		Output(0) = q;                  // 始终输出 Q
+	}
+};
+//3态门
+class TriStateGate : public Unit {
+public:
+	// 构造函数：2个输入（数据，使能），1个输出
+	TriStateGate() : Unit(2, 1) {}
+
+	void Do() override {
+		if (int(Input(1)) == 1) {       // 使能有效，输出等于输入数据
+			Output(0) = Input(0);
+		}
+		else {                 // 使能无效，输出为高阻态
+			Output(0) = -1;      // 用 -1 表示高阻态
+		}
+	}
+};
+
 //线路类，包含多个单元
 class circuit {
 private:
-	std::vector<Unit*> units;
+	std::vector<Unit*> comboUnits;
+	std::vector<Unit*> seqUnits;
 	bool IsSorted = false;
 	bool IsInitialized = false;
 public:
 	std::string name;
 
 	void AddUnit(Unit* unit) {
-		units.push_back(unit);
+		if (unit->isSequential())
+			seqUnits.push_back(unit);
+		else
+			comboUnits.push_back(unit);
 		IsSorted = false;
 	}
 
 	//拓扑排序，保证每个单元的依赖都在它之前执行
 	void Sort() {
-		if (IsSorted)return;
+		if (IsSorted) return;
+
+		// 只对组合单元进行拓扑排序
 		std::vector<Unit*> sorted;
-		std::vector<Unit*> unsorted = units;
+		std::vector<Unit*> unsorted = comboUnits;
 
 		while (!unsorted.empty()) {
 			bool progress = false;
@@ -186,6 +293,9 @@ public:
 				Unit* unit = *it;
 				bool canSort = true;
 				for (Unit* req : unit->Requires) {
+					// 如果依赖是时序单元，忽略（因为时序单元的输出是已知的当前值）
+					if (req->isSequential()) continue;
+					// 否则要求 req 已在 sorted 中
 					if (std::find(sorted.begin(), sorted.end(), req) == sorted.end()) {
 						canSort = false;
 						break;
@@ -201,12 +311,11 @@ public:
 				}
 			}
 			if (!progress) {
-				throw std::runtime_error("Cyclic dependency detected");
+				throw std::runtime_error("Cyclic dependency in combinational logic");
 			}
 		}
+		comboUnits = sorted;
 		IsSorted = true;
-		units = sorted;
-
 	}
 
 	virtual void Init() {}
@@ -217,8 +326,14 @@ public:
 			IsInitialized = !IsInitialized;
 		}
 		Sort();
-		for (auto& unit : units) {
-			unit->Do();
+		// 阶段1：计算所有组合单元
+		for (Unit* u : comboUnits) {
+			u->Do();
+		}
+
+		// 阶段2：更新所有时序单元
+		for (Unit* u : seqUnits) {
+			u->Do();
 		}
 	}
 };
@@ -278,9 +393,7 @@ public:
 	}
 
 	void Do() override {
-		std::cout << "adder input " << Input(0) << " " << Input(1) << " " << Input(2) << std::endl;
 		Excute();
-		std::cout << "adder output " << Output(0) << " " << Output(1) << std::endl;
 	}
 };
 
