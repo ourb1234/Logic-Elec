@@ -1,23 +1,22 @@
 ﻿#include"elec.hpp"
 
 int main() {
-	Adder* adder = new Adder();
+	Adder8bit* adder = new Adder8bit();
+	adder->Input(16) = 0;
+	Measure8bit* measure = new Measure8bit();
+	ManualInput8bitBlock* input1 = new ManualInput8bitBlock();
+	ManualInput8bitBlock* input2 = new ManualInput8bitBlock();
 
-	circuit circuit;
-	ManualInput* input = new ManualInput(3);
-	input->Connect(0, adder, 0);
-	input->Connect(1, adder, 1);
-	input->Connect(2, adder, 2);
+	for (int i = 0; i < 8; i++) {
+		input1->Connect(i, adder, i);
+		input2->Connect(i, adder, i + 8);
+		adder->Connect(i, measure, i);
+	}
 
-	Measure* measure = new Measure();
-	adder->Connect(0, measure, 0);
-	Measure* measure2 = new Measure();
-	adder->Connect(1, measure2, 0);
-
-	circuit.AddUnit(adder);
-	circuit.AddUnit(input);
-	circuit.AddUnit(measure);
-	circuit.AddUnit(measure2);
-
-	circuit.Excute();
+	circuit cir;
+	cir.AddUnit(input1)
+		.AddUnit(input2)
+		.AddUnit(adder)
+		.AddUnit(measure);
+	cir.Excute();
 }

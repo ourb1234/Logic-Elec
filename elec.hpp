@@ -6,6 +6,17 @@
 #include<print>
 #include<iostream>
 #include<chrono>
+#include<conio.h>
+#include<Windows.h>
+#include<thread>
+#include<queue>
+#include<mutex>
+int GetInputNonBlocking() {
+	if (_kbhit()) {
+		return _getch();
+	}
+	return -1;
+}
 
 //bit位，便于抽象
 class Bit {
@@ -145,6 +156,25 @@ public:
 	}
 };
 
+class Measure8bit :public Unit {
+public:
+	std::string name = "";
+	Measure8bit() :Unit(8, 8) {}
+
+	void Do() override {
+		int value = 0;
+		for (int i = 0; i < 8; ++i) {
+			if (Input(i).isOne()) {
+				value |= (1 << i);
+			}
+		}
+		std::print("{}Measure: {}\n", name, value);
+		for (size_t i = 0; i < Outputs.size(); ++i) {
+			Output(i) = Input(i);
+		}
+	}
+};
+
 //信号源
 class Clock : public Unit {
 public:
@@ -166,6 +196,130 @@ public:
 			std::cout << "Input value for output " << i << ": ";
 			std::cin >> value;
 			Output(i) = value;
+		}
+	}
+};
+
+class ManualInput8bitBlock : public Unit {
+public:
+	ManualInput8bitBlock() : Unit(0, 8) {}
+
+	void Do() override {
+		int value;
+		std::cout << "Input value for output " << ": ";
+		std::cin >> value;
+		for (int i = 0; i < 8; ++i)
+			Output(i) = (value >> i) & 1;
+	}
+};
+
+class ManualInput8bit : public Unit {
+private:
+	std::queue<int> inputQueue;   // 存放未处理的输入值
+	std::mutex mtx;
+	std::thread worker;
+	bool running = true;
+	bool lastClock = false;
+
+	void inputLoop() {
+		while (running) {
+			int val;
+			std::cin >> val;
+			std::lock_guard<std::mutex> lock(mtx);
+			inputQueue.push(val);
+		}
+	}
+
+public:
+	ManualInput8bit() : Unit(1, 9) {
+		worker = std::thread(&ManualInput8bit::inputLoop, this);
+	}
+
+	~ManualInput8bit() {
+		running = false;
+		if (worker.joinable())
+			worker.join();
+	}
+
+	void Do() override {
+		bool clk = Input(0).isOne();
+		if (!lastClock && clk) {       // 上升沿采样
+			int currentValue = -1;
+			{
+				std::lock_guard<std::mutex> lock(mtx);
+				if (!inputQueue.empty()) {
+					currentValue = inputQueue.front();
+					inputQueue.pop();
+				}
+			}
+			if (currentValue != -1) {
+				for (int i = 0; i < 8; ++i)
+					Output(i) = (currentValue >> i) & 1;
+				Output(8) = 1;
+			}
+			else {
+				for (int i = 0; i < 8; ++i)
+					Output(i) = -1;
+				Output(8) = 0;
+			}
+		}
+		lastClock = clk;
+	}
+};
+
+//按键输入
+class KeyInput8bit : public Unit {
+private:
+	bool lastClock = false;
+public:
+	// 输入：时钟 (索引 0)
+	// 输出：8位数据 (索引 0-7)，有效标志 (索引 8)
+	KeyInput8bit() : Unit(1, 9) {}
+
+	virtual bool isSequential() const override { return true; }
+
+	void Do() override {
+		bool clk = Input(0).isOne();
+		if (!lastClock && clk) {       // 上升沿检测
+			// 清除输出：数据位设为高阻，有效标志置 0
+			for (int i = 0; i < 8; ++i) {
+				Output(i) = -1;        // 高阻
+			}
+			Output(8) = 0;              // 有效标志清零
+
+			int16_t value = GetInputNonBlocking();
+			if (value != -1) {
+				for (int i = 0; i < 8; ++i) {
+					Output(i) = (value >> i) & 1;
+				}
+				Output(8) = 1;          // 有效标志置 1
+			}
+		}
+		lastClock = clk;
+	}
+};
+
+class ASCIIToDigit : public Unit {
+public:
+	ASCIIToDigit() : Unit(8, 4) {} // 8 位 ASCII 输入，4 位数值输出
+
+	void Do() override {
+		// 读取 ASCII 码
+		int ascii = 0;
+		for (int i = 0; i < 8; ++i) {
+			if (Input(i).isOne()) ascii |= (1 << i);
+		}
+
+		// 转换为数值
+		if (ascii >= '0' && ascii <= '9') {
+			int digit = ascii - '0';
+			for (int i = 0; i < 4; ++i) {
+				Output(i) = (digit >> i) & 1;
+			}
+		}
+		else {
+			// 非数字输入，输出高阻或保持
+			for (int i = 0; i < 4; ++i) Output(i) = -1;
 		}
 	}
 };
@@ -271,12 +425,14 @@ private:
 public:
 	std::string name;
 
-	void AddUnit(Unit* unit) {
+	circuit& AddUnit(Unit* unit) {
 		if (unit->isSequential())
 			seqUnits.push_back(unit);
 		else
 			comboUnits.push_back(unit);
 		IsSorted = false;
+
+		return *this;
 	}
 
 	//拓扑排序，保证每个单元的依赖都在它之前执行
@@ -390,6 +546,79 @@ public:
 		AddUnit(xorGate1);
 		AddUnit(xorGate2);
 
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+
+//8位寄存器
+class Rigster : public Unit, public circuit {
+public:
+	//8位输入，1位时钟
+	Rigster() :Unit(9, 8) {}
+
+	void Init() override {
+		DFlipFlop* dffs[8];
+		for (int i = 0; i < 8; i++) {
+			dffs[i] = new DFlipFlop();
+			SetInput(i, dffs[i], 0);//数据输入
+			SetInput(8, dffs[i], 1);//时钟输入
+			SetOutput(i, dffs[i], 0);//数据输出
+			AddUnit(dffs[i]);
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+//8位3态门
+class TriStateGate8bit : public Unit, public circuit {
+public:
+	//8位数据输入 1位使能 -> 8位数据输出
+	TriStateGate8bit() :Unit(9, 8) {}
+
+	void Init() override {
+		TriStateGate* gates[8];
+		for (int i = 0; i < 8; i++) {
+			gates[i] = new TriStateGate();
+			SetInput(i, gates[i], 0);//数据输入
+			SetInput(8, gates[i], 1);//使能输入
+			SetOutput(i, gates[i], 0);//数据输出
+			AddUnit(gates[i]);
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+class Adder8bit : public Unit, public circuit {
+public:
+	//8bit 加数 8bit被加数 1位进位 -> 8bit和 1位进位
+	Adder8bit() :Unit(17, 9) {}
+
+	void Init() override {
+		Adder* adderTemp = nullptr;
+		for (int i = 0; i < 8; i++) {
+			Adder* adder = new Adder();
+			if (i == 0) {
+				SetInput(16, adder, 2);
+			}
+			else {
+				adderTemp->Connect(1, adder, 2);//连接前一个加法器的进位输出到当前加法器的进位输入
+			}
+
+			SetInput(i, adder, 0);//绑定1位输入
+			SetInput(i + 8, adder, 1);//绑定1位输入
+
+			SetOutput(i, adder, 0);//绑定1位输出
+			adderTemp = adder;
+			AddUnit(adder);
+		}
+		SetOutput(8, adderTemp, 1);//绑定最后一个加法器的进位输出到整体的进位输出
 	}
 
 	void Do() override {
