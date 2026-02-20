@@ -22,7 +22,7 @@ int GetInputNonBlocking() {
 class Bit {
 private:
 	bool value = 0;
-	bool IsHighImpedance = false;
+	bool IsHighImpedance = false;//高阻状态，表示该位没有被任何信号驱动，可以理解为悬空
 public:
 	Bit() = default;
 	Bit(bool v) :value(v) { }
@@ -105,15 +105,16 @@ protected:
 	std::vector<Node> Inputs;
 	std::vector<Node> Outputs;
 	std::vector<Unit*> Requires;
-
+	//单元内部连接，用于连接子原件
 	void SetInput(size_t InputIndex, Unit* _unit, size_t _InputIndex) {
 		_unit->Inputs[_InputIndex] = Inputs[InputIndex];
 	}
-
+	//单元内部连接，用于连接子原件
 	void SetOutput(size_t OutputIndex, Unit* _unit, size_t _OutputIndex) {
 		_unit->Outputs[_OutputIndex] = Outputs[OutputIndex];
 	}
 public:
+	//输入输出数量由构造函数指定
 	Unit(size_t inputCount, size_t outputCount) {
 		Inputs.resize(inputCount);
 		Outputs.resize(outputCount);
@@ -121,21 +122,21 @@ public:
 	virtual bool isSequential() const { return false; }
 	//必须实现的函数，执行单元的逻辑
 	virtual void Do() {}
-
+	//为对应位设置输入数据
 	Bit& Input(size_t index) {
 		if (index >= Inputs.size()) {
 			throw std::out_of_range("Input index out of range");
 		}
 		return Inputs[index].Value();
 	}
-
+	//为对应位设置输出数据
 	Bit& Output(size_t index) {
 		if (index >= Outputs.size()) {
 			throw std::out_of_range("Input index out of range");
 		}
 		return Outputs[index].Value();
 	}
-
+	//连接两个单元的输入输出，outputIndex是当前单元的输出索引，inputIndex是另一个单元的输入索引
 	void Connect(size_t outputIndex, Unit* other, size_t inputIndex) {
 		other->Inputs[inputIndex].Connect(Outputs[outputIndex].Output);
 		if (std::find(other->Requires.begin(), other->Requires.end(), this) == other->Requires.end())
@@ -392,14 +393,14 @@ public:
 	DFlipFlop() : Unit(2, 1) {} // 输入：D, CLK
 	void Do() override {
 		bool clk = (Input(1) == 1);
-		if (!lastClock && clk) {       // 上升沿检测
-			q = Input(0);               // 采样 D
+		if (!lastClock && clk) {// 上升沿检测
+			q = Input(0);// 采样 D
 		}
 		lastClock = clk;
 		if (q == -1) {
 			return;//高阻状态不更新输出
 		}
-		Output(0) = q;                  // 始终输出 Q
+		Output(0) = q;// 始终输出 Q
 	}
 };
 //3态门
@@ -409,11 +410,11 @@ public:
 	TriStateGate() : Unit(2, 1) {}
 
 	void Do() override {
-		if (int(Input(1)) == 1) {       // 使能有效，输出等于输入数据
+		if (int(Input(1)) == 1) {// 使能有效，输出等于输入数据
 			Output(0) = Input(0);
 		}
-		else {                 // 使能无效，输出为高阻态
-			Output(0) = -1;      // 用 -1 表示高阻态
+		else {// 使能无效，输出为高阻态
+			Output(0) = -1;// 用 -1 表示高阻态
 		}
 	}
 };
