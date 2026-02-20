@@ -50,13 +50,13 @@ public:
 	}
 
 	Bit operator &(const Bit& bit)const {
-		if (IsHighImpedance)return *this;
+		if (IsHighImpedance)return bit.value;
 		return value & bit.value;
 	}
 
 
 	Bit operator |(const Bit& bit)const {
-		if (IsHighImpedance)return *this;
+		if (IsHighImpedance)return bit.value;
 		return value | bit.value;
 	}
 };
@@ -396,6 +396,9 @@ public:
 			q = Input(0);               // 采样 D
 		}
 		lastClock = clk;
+		if (q == -1) {
+			return;//高阻状态不更新输出
+		}
 		Output(0) = q;                  // 始终输出 Q
 	}
 };
@@ -412,6 +415,38 @@ public:
 		else {                 // 使能无效，输出为高阻态
 			Output(0) = -1;      // 用 -1 表示高阻态
 		}
+	}
+};
+//多路选择器
+class Mux2to4 : public Unit {
+public:
+	Mux2to4() :Unit(2, 4) {}
+	void Do() override {
+
+		//a b -> !a&!b | a&!b | !a&b |a&b
+
+		Output(0) = !Input(0) & !Input(1);
+		Output(1) = Input(0) & !Input(1);
+		Output(2) = !Input(0) & Input(1);
+		Output(3) = Input(0) & Input(1);
+
+	}
+};
+
+class Mux3to8 : public Unit {
+public:
+	Mux3to8() : Unit(3, 8) {}
+
+	void Do() override {
+		//a b c -> !a&!b&!c | a&!b&!c | !a&b&!c | a&b&!c | !a&!b&c | a&!b&c | !a&b&c | a&b&c
+		Output(0) = !Input(0) & !Input(1) & !Input(2);
+		Output(1) = Input(0) & !Input(1) & !Input(2);
+		Output(2) = !Input(0) & Input(1) & !Input(2);
+		Output(3) = Input(0) & Input(1) & !Input(2);
+		Output(4) = !Input(0) & !Input(1) & Input(2);
+		Output(5) = Input(0) & !Input(1) & Input(2);
+		Output(6) = !Input(0) & Input(1) & Input(2);
+		Output(7) = Input(0) & Input(1) & Input(2);
 	}
 };
 
@@ -553,27 +588,6 @@ public:
 	}
 };
 
-//8位寄存器
-class Rigster : public Unit, public circuit {
-public:
-	//8位输入，1位时钟
-	Rigster() :Unit(9, 8) {}
-
-	void Init() override {
-		DFlipFlop* dffs[8];
-		for (int i = 0; i < 8; i++) {
-			dffs[i] = new DFlipFlop();
-			SetInput(i, dffs[i], 0);//数据输入
-			SetInput(8, dffs[i], 1);//时钟输入
-			SetOutput(i, dffs[i], 0);//数据输出
-			AddUnit(dffs[i]);
-		}
-	}
-
-	void Do() override {
-		Excute();
-	}
-};
 //8位3态门
 class TriStateGate8bit : public Unit, public circuit {
 public:
@@ -595,6 +609,78 @@ public:
 		Excute();
 	}
 };
+
+//8位寄存器
+class Rigster : public Unit, public circuit {
+public:
+	//8位输入，1位时钟，1位写使能,1位读使能-> 8位输出
+	Rigster() :Unit(11, 8) {}
+	virtual bool isSequential() const { return true; }
+	void Init() override {
+		DFlipFlop* dffs[8];
+		TriStateGate8bit* WriteEnable = new TriStateGate8bit();
+		TriStateGate8bit* ReadEnable = new TriStateGate8bit();
+		SetInput(10, ReadEnable, 8);//连接读使能到三态门使能输入
+		SetInput(9, WriteEnable, 8);//连接写使能到三态门使能输入
+		for (int i = 0; i < 8; i++) {
+			dffs[i] = new DFlipFlop();
+			SetInput(i, WriteEnable, 0);//数据输入
+			WriteEnable->Connect(i, dffs[i], 0);//连接写数据到寄存器输入 
+			SetInput(8, dffs[i], 1);//时钟输入
+			dffs[i]->Connect(0, ReadEnable, i);//连接寄存器输出到三态门输入
+			SetOutput(i, ReadEnable, i);//数据输出
+			AddUnit(dffs[i]);
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+
+using MemoryUnit = Rigster;//内存单元，和寄存器功能一样，只是名字不同，便于理解
+
+//内存块，包含多个内存单元，可以通过地址输入选择读写哪个单元
+//一个内存块8个单元
+class MemoryBlock : public Unit, public circuit {
+public:
+	//输入：8位数据输入,1位时钟,1位写控制，1位读控制，3位地址输入
+	//共8个内存单元，3位地址可以映射到8个单元
+	//输出：8位数据输出
+	MemoryBlock() :Unit(14, 8) {}
+	virtual bool isSequential() const { return true; }
+
+	void Init() override {
+		MemoryUnit* memUnits[8];
+		Mux3to8* mux = new Mux3to8();//地址选择器
+		SetInput(11, mux, 0);
+		SetInput(12, mux, 1);
+		SetInput(13, mux, 2);
+		for (int i = 0; i < 8; i++) {
+			memUnits[i] = new MemoryUnit();
+
+			for (int j = 0; j < 8; j++) {
+				SetInput(j, memUnits[i], j);//数据输入
+				SetOutput(j, memUnits[i], j);//数据输出
+			}
+			//确保选择对应的内存地址
+			mux->Connect(i, memUnits[i], 9);//连接地址选择到每个内存单元的写使能输入
+			mux->Connect(i, memUnits[i], 10);//连接地址选择到每个内存单元的读使能输入
+
+			//读写使能输入
+			SetInput(9, memUnits[i], 9);//写控制输入
+			SetInput(10, memUnits[i], 10);//读控制输入
+
+			SetInput(8, memUnits[i], 8);//时钟输入
+			AddUnit(memUnits[i]);
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+
 class Adder8bit : public Unit, public circuit {
 public:
 	//8bit 加数 8bit被加数 1位进位 -> 8bit和 1位进位
@@ -626,24 +712,21 @@ public:
 	}
 };
 
-void test() {
-	AndGate* andGate = new AndGate();
-	Measure* measure = new Measure();
-	OrGate* orGate = new OrGate();
-	ManualInput* In = new ManualInput(3);
+//未解决
+class Bus8bit : public Unit {
+public:
+	Bus8bit() :Unit(8, 8) {}
 
-	In->Connect(0, andGate, 0);
-	In->Connect(1, andGate, 1);
-	In->Connect(2, orGate, 1);
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Output(i) = Input(i);
+		}
+	}
+};
 
-	andGate->Connect(0, orGate, 0);
-	orGate->Connect(0, measure, 0);
+class CPU {
+public:
+	CPU() {
 
-	circuit c;
-	c.AddUnit(andGate);
-	c.AddUnit(measure);
-	c.AddUnit(orGate);
-	c.AddUnit(In);
-
-	c.Excute();
-}
+	}
+};
