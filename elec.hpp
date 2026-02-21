@@ -176,6 +176,103 @@ public:
 	}
 };
 
+class MeasureNbit : public Unit {
+public:
+	std::string name = "";
+	MeasureNbit(int n) :Unit(n, n) {}
+
+	void Do() override {
+		int value = 0;
+		for (int i = 0; i < Outputs.size(); ++i) {
+			if (Input(i).isOne()) {
+				value |= (1 << i);
+			}
+		}
+		std::print("{}Measure: {}\n", name, value);
+		for (size_t i = 0; i < Outputs.size(); ++i) {
+			Output(i) = Input(i);
+		}
+	}
+};
+
+class SignedMeasure8bit : public Unit {
+public:
+	std::string name = "";
+	SignedMeasure8bit() : Unit(8, 8) {}
+
+	void Do() override {
+		int value = 0;
+		bool hasHighZ = false;
+
+		// 读取每一位，检查高阻并组合数值（无符号）
+		for (int i = 0; i < 8; ++i) {
+			if (Input(i).isHighZ()) {
+				hasHighZ = true;
+				break;          // 遇到高阻立即标记并退出循环
+			}
+			if (Input(i).isOne()) {
+				value |= (1 << i);
+			}
+		}
+
+		if (hasHighZ) {
+			std::print("{}Measure (signed): HighZ\n", name);
+		}
+		else {
+			// 将有符号解释：若最高位为1，则为负数
+			int signedValue = value;
+			if (value & 0x80) {          // 最高位为1
+				signedValue = value - 256;   // 等价于补码转原值
+			}
+			std::print("{}Measure (signed): {}\n", name, signedValue);
+		}
+
+		// 输出直通（将输入复制到输出）
+		for (size_t i = 0; i < Outputs.size(); ++i) {
+			Output(i) = Input(i);
+		}
+	}
+};
+
+class SignedMeasureNbit : public Unit {
+public:
+	std::string name = "";
+	SignedMeasureNbit(int n) : Unit(n, n) {}
+
+	void Do() override {
+		int value = 0;
+		bool hasHighZ = false;
+
+		// 读取每一位，检查高阻并组合数值（无符号）
+		for (int i = 0; i < Outputs.size(); ++i) {
+			if (Input(i).isHighZ()) {
+				hasHighZ = true;
+				break;          // 遇到高阻立即标记并退出循环
+			}
+			if (Input(i).isOne()) {
+				value |= (1 << i);
+			}
+		}
+
+		if (hasHighZ) {
+			std::print("{}Measure (signed): HighZ\n", name);
+		}
+		else {
+			// 将有符号解释：若最高位为1，则为负数
+			int signedValue = value;
+			if (value & (1 << (Outputs.size() - 1))) {          // 最高位为1
+				signedValue = value - (1 << Outputs.size());   // 等价于补码转原值
+			}
+			std::print("{}Measure (signed): {}\n", name, signedValue);
+		}
+
+		// 输出直通（将输入复制到输出）
+		for (size_t i = 0; i < Outputs.size(); ++i) {
+			Output(i) = Input(i);
+		}
+	}
+};
+
 //信号源
 class Clock : public Unit {
 public:
@@ -211,6 +308,51 @@ public:
 		std::cin >> value;
 		for (int i = 0; i < 8; ++i)
 			Output(i) = (value >> i) & 1;
+	}
+};
+
+class ManualInputNbitBlock : public Unit {
+public:
+	std::string Name;
+	ManualInputNbitBlock(int n) : Unit(0, n) {}
+
+	void Do() override {
+		int value;
+		std::cout << Name << " Input value for output " << ": ";
+		std::cin >> value;
+		for (int i = 0; i < Outputs.size(); ++i)
+			Output(i) = (value >> i) & 1;
+	}
+};
+
+class ManualInput8bitBlockByBit : public Unit {
+public:
+	ManualInput8bitBlockByBit() : Unit(0, 8) {}
+
+	void Do() override {
+		int value;
+		std::cout << "Input value for output " << ": ";
+		std::cin >> value;
+		for (int i = 7; i >= 0; i--) {
+			Output(i) = value % 10;
+			value /= 10;
+		}
+	}
+};
+
+class ManualInputNbitBlockByBit : public Unit {
+public:
+	std::string Name;
+	ManualInputNbitBlockByBit(int n) : Unit(0, n) {}
+
+	void Do() override {
+		int value;
+		std::cout << Name << " Input value for output " << ": ";
+		std::cin >> value;
+		for (int i = Outputs.size() - 1; i >= 0; i--) {
+			Output(i) = value % 10;
+			value /= 10;
+		}
 	}
 };
 
@@ -353,6 +495,8 @@ public:
 };
 
 class NotGate : public Unit {
+public:
+
 	NotGate() :Unit(1, 1) {}
 
 	void Do() override {
@@ -365,6 +509,178 @@ public:
 	XorGate() :Unit(2, 1) {}
 	void Do() override {
 		Output(0) = Input(0) & !Input(1) | !Input(0) & Input(1);
+	}
+};
+//8位逻辑门
+class AndGate8bit : public Unit {
+public:
+	AndGate8bit() :Unit(16, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Output(i) = Input(i) & Input(i + 8);
+		}
+	}
+};
+
+//多输入与
+class AndGate8bit_nInput : public Unit {
+public:
+	AndGate8bit_nInput(int n) :Unit(8 * n, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Bit result = 1;
+			for (int j = 0; j < Inputs.size() / 8; ++j) {
+				result = result & Input(i + j * 8);
+			}
+			Output(i) = result;
+		}
+
+	}
+};
+
+class OrGate8bit : public Unit {
+public:
+	OrGate8bit() :Unit(16, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Output(i) = Input(i) | Input(i + 8);
+		}
+	}
+};
+
+//多输入或
+class OrGate8bit_nInput : public Unit {
+public:
+	OrGate8bit_nInput(int n) :Unit(8 * n, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Bit result = 0;
+			for (int j = 0; j < Inputs.size() / 8; ++j) {
+				result = result | Input(i + j * 8);
+			}
+			Output(i) = result;
+		}
+
+	}
+
+};
+
+class NotGate8bit : public Unit {
+public:
+	NotGate8bit() :Unit(8, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Output(i) = !Input(i);
+		}
+	}
+
+};
+
+class XorGate8bit : public Unit {
+public:
+	XorGate8bit() :Unit(16, 8) {}
+
+	void Do() override {
+		for (int i = 0; i < 8; ++i) {
+			Output(i) = Input(i) & !Input(i + 8) | !Input(i) & Input(i + 8);
+		}
+	}
+};
+
+//n位与
+class AndGateNbit : public Unit {
+private:
+	int Nbit;
+public:
+	AndGateNbit(int n) :Unit(n * 2, n), Nbit(n) {}
+
+	void Do()override {
+		for (int i = 0; i < Nbit; ++i) {
+			Output(i) = Input(i) & Input(i + Nbit);
+		}
+	}
+};
+
+class AndGateNBit_nInput : public Unit {
+private:
+	int Nbit;
+public:
+	AndGateNBit_nInput(int n, int inputNum) :Unit(n* inputNum, n), Nbit(n) {}
+
+	void Do() override {
+		for (int i = 0; i < Nbit; ++i) {
+			Bit result = 1;
+			for (int j = 0; j < Inputs.size() / Nbit; ++j) {
+				result = result & Input(i + j * Nbit);
+			}
+			Output(i) = result;
+		}
+
+	}
+};
+//n位或
+class OrGateNBit :public Unit {
+private:
+	int Nbit;
+public:
+	OrGateNBit(int n) :Unit(n * 2, n), Nbit(n) {}
+
+	void Do()override {
+		for (int i = 0; i < Nbit; ++i) {
+			Output(i) = Input(i) | Input(i + Nbit);
+		}
+	}
+};
+
+//n位多输入或
+class OrGateNBit_nInput : public Unit {
+private:
+	int Nbit;
+public:
+	OrGateNBit_nInput(int n, int inputNum) :Unit(n* inputNum, n), Nbit(n) {}
+
+	void Do() override {
+		for (int i = 0; i < Nbit; ++i) {
+			Bit result = 0;
+			for (int j = 0; j < Inputs.size() / Nbit; ++j) {
+				result = result | Input(i + j * Nbit);
+			}
+			Output(i) = result;
+		}
+
+	}
+};
+
+//n位异或
+class XorGateNBit : public Unit {
+private:
+	int Nbit;
+public:
+	XorGateNBit(int n) :Unit(n * 2, n), Nbit(n) {}
+
+	void Do()override {
+		for (int i = 0; i < Nbit; ++i) {
+			Output(i) = Input(i) & !Input(i + Nbit) | !Input(i) & Input(i + Nbit);
+		}
+	}
+};
+
+//n位非
+class NotGateNBit : public Unit {
+private:
+	int Nbit;
+public:
+	NotGateNBit(int n) :Unit(n, n), Nbit(n) {}
+
+	void Do()override {
+		for (int i = 0; i < Nbit; ++i) {
+			Output(i) = !Input(i);
+		}
 	}
 };
 
@@ -530,6 +846,50 @@ public:
 	}
 };
 
+class Mux4to16 :public Unit, public circuit {
+public:
+	Mux4to16() : Unit(4, 16) {}
+
+	void Init() override {
+		Mux3to8* Mux[2];
+		for (int i = 0; i < 2; i++) {
+			Mux[i] = new Mux3to8;
+			AddUnit(Mux[i]);
+			for (int j = 1; j < 4; j++) {
+				SetInput(j, Mux[i], j);
+			}
+		}
+
+		AndGate* andGate[18];
+
+		for (int i = 0; i < 2; i++) {
+			andGate[i] = new AndGate();
+			AddUnit(andGate[i]);
+
+			if (i == 0) {
+				NotGate* notGate = new NotGate();
+				AddUnit(notGate);
+				SetInput(0, notGate, 0);
+				notGate->Connect(0, andGate[i], 0);
+			}
+			else {
+				SetInput(0, andGate[i], 0);
+			}
+		}
+
+		for (int i = 0; i < 16; i++) {
+			andGate[i + 2] = new AndGate();
+			AddUnit(andGate[i + 2]);
+			andGate[i / 8]->Connect(0, andGate[i + 2], 0);
+			Mux[i / 8]->Connect(i % 8, andGate[i + 2], 1);
+			SetOutput(i, andGate[i + 2], 0);
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
 /*
 * a b cin -> sum cout
 * 0 0 0   -> 0   0
@@ -684,8 +1044,8 @@ public:
 
 class Adder8bit : public Unit, public circuit {
 public:
-	//8bit 加数 8bit被加数 1位进位 -> 8bit和 1位进位
-	Adder8bit() :Unit(17, 9) {}
+	//8bit 加数 8bit被加数 1位进位 -> 8bit和 1位进位 5个标记位（占位）
+	Adder8bit() :Unit(17, 14) {}
 
 	void Init() override {
 		Adder* adderTemp = nullptr;
@@ -713,7 +1073,326 @@ public:
 	}
 };
 
-//未解决
+class AdderNbit : public Unit, public circuit {
+private:
+	int Nbit;
+public:
+	//输入：Nbit加数 Nbit被加数 1位进位 -> Nbit和 1位进位 5个标记位（占位）
+	AdderNbit(int n) : Unit(2 * n + 1, n + 6), Nbit(n) {}
+
+	void Init() override {
+		std::vector<Adder*> adders(Nbit);
+		for (int i = 0; i < Nbit; i++) {
+			adders[i] = new Adder();
+			if (i == 0) {
+				SetInput(2 * Nbit, adders[i], 2);
+			}
+			else {
+				adders[i - 1]->Connect(1, adders[i], 2);//连接前一个加法器的进位输出到当前加法器的进位输入
+			}
+
+			SetInput(i, adders[i], 0);//绑定1位输入
+			SetInput(i + Nbit, adders[i], 1);//绑定1位输入
+
+			SetOutput(i, adders[i], 0);//绑定1位输出
+			AddUnit(adders[i]);
+		}
+		SetOutput(Nbit, adders[Nbit - 1], 1);//绑定最后一个加法器的进位输出到整体的进位输出
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+
+class ALU8bit :public Unit, public circuit {
+public:
+	//8bitALU单元
+	//8bit 输入A 8bit输入B 1bit进位信息 3bit操作码(最多8个操作，加减，与或非)
+	//8bit输出结果 1bit进位输出 , 5bit标记位（占位）
+	ALU8bit() :Unit(20, 14) {}
+
+	void Init() override {
+		//8bit加法器
+		Adder8bit* adder = new Adder8bit();
+		AddUnit(adder);
+		//3-8解码器
+		//加减乘除，与或，左移右移
+		Mux3to8* decoder = new Mux3to8();
+		AddUnit(decoder);
+		//输入与门
+		OrGate8bit_nInput* OutputGate = new OrGate8bit_nInput(8);//8输入或门，连接8个操作的输出到结果输出
+		AddUnit(OutputGate);
+		for (size_t index = 0; index < 8; index++) {
+			SetOutput(index, OutputGate, index);//连接结果输出到8输入与门的输出
+		}
+
+
+		//连接操作码到解码器
+		for (size_t index = 0; index < 3; index++) {
+			SetInput(17 + index, decoder, index);
+		}
+
+		{
+			//加法器处理
+			//输入A ,加减相同
+			for (size_t index = 0; index < 8; index++) {
+				SetInput(index, adder, index);//按位连接输入A
+			}
+
+			//输入B,加法直接输入，减法取反输入，进位输入1
+			//3个8位与门来实现输入的选择
+			//1个8位非门来实现B取反
+			AndGate8bit* andGateAdd[2];
+			for (size_t index = 0; index < 2; index++) {
+				andGateAdd[index] = new AndGate8bit();
+				AddUnit(andGateAdd[index]);
+			}
+			NotGate8bit* notGate = new NotGate8bit();
+			AddUnit(notGate);
+			//1位非处理减法输入和进位输入
+			NotGate* SubNotGate = new NotGate();
+			AddUnit(SubNotGate);
+			decoder->Connect(1, SubNotGate, 0);//连接操作码的第2位到减法非门输入
+			//连接B输入
+			for (size_t index = 0; index < 8; index++) {
+				SetInput(index + 8, andGateAdd[0], index);//按位连接输入B到第一个与门
+				//连接解码器信号，减法信号对应第二个信号
+				//第一个门对应加法，用非门连接
+				SubNotGate->Connect(0, andGateAdd[0], index + 8);
+				SetInput(index + 8, notGate, index);//按位连接输入B到非门
+				notGate->Connect(index, andGateAdd[1], index);//连接非门输出到第二个与门
+				decoder->Connect(1, andGateAdd[1], index + 8);//连接操作码的第2位到第二个与门输入
+			}
+
+			//1个或门来选择加法器输入，连接两个与门输出到加法器输入
+			OrGate8bit* orGate8bit = new OrGate8bit();
+			AddUnit(orGate8bit);
+
+			//连接两个与门输入到加法器输入
+			for (size_t index = 0; index < 8; index++) {
+				andGateAdd[0]->Connect(index, orGate8bit, index);
+				andGateAdd[1]->Connect(index, orGate8bit, index + 8);
+				orGate8bit->Connect(index, adder, index + 8);
+			}
+
+			//连接进位信息
+			//如果是减法，进位输入位1，使用1位或实现 
+			OrGate* orGate = new OrGate();
+			AddUnit(orGate);
+			decoder->Connect(1, orGate, 0);
+			SetInput(16, orGate, 1);
+			orGate->Connect(0, adder, 16);//连接或门输出到加法器的进位输入
+
+			//连接加减法到输出门
+			for (size_t i = 0; i < 2; i++) {
+				AndGate8bit* andGateOp = new AndGate8bit();
+				AddUnit(andGateOp);
+				for (size_t index = 0; index < 8; index++) {
+					adder->Connect(index, andGateOp, index);
+					andGateOp->Connect(index, OutputGate, index + i * 8);
+					decoder->Connect(i, andGateOp, index + 8);
+				}
+			}
+		}
+
+		//与或实现
+		//8位与门
+		{
+			AndGate8bit* AndGate = new AndGate8bit();
+			AddUnit(AndGate);
+			AndGate8bit* andGateOp = new AndGate8bit();
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < 8; index++) {
+				SetInput(index, AndGate, index);
+				SetInput(index + 8, AndGate, index + 8);
+				AndGate->Connect(index, andGateOp, index);
+				decoder->Connect(2, andGateOp, index + 8);
+				andGateOp->Connect(index, OutputGate, index + 16);
+			}
+		}
+
+		//8位或门
+		{
+			OrGate8bit* OrGate = new OrGate8bit();
+			AddUnit(OrGate);
+			AndGate8bit* andGateOp = new AndGate8bit();
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < 8; index++) {
+				SetInput(index, OrGate, index);
+				SetInput(index + 8, OrGate, index + 8);
+				OrGate->Connect(index, andGateOp, index);
+				decoder->Connect(3, andGateOp, index + 8);
+				andGateOp->Connect(index, OutputGate, index + 24);
+			}
+
+		}
+
+		//8位非
+		{
+			NotGate8bit* notGate = new NotGate8bit();
+			AddUnit(notGate);
+			AndGate8bit* andGateOp = new AndGate8bit();
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < 8; index++) {
+				SetInput(index, notGate, index);
+				notGate->Connect(index, andGateOp, index);
+				decoder->Connect(4, andGateOp, index + 8);
+				andGateOp->Connect(index, OutputGate, index + 32);
+			}
+			//非操作只使用输入A，输入B不连接
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+
+class ALU : public Unit, public circuit {
+private:
+	int Nbit;
+public:
+	//2*n输入 1bit进位信息 3bit操作码(最多8个操作，加减，与或非) -> n bit输出 1bit进位输出 , 5bit标记位（占位）
+	ALU(int n) : Unit(2 * n + 1 + 3, n + 6), Nbit(n) {}
+	void Init() override {
+		//位数匹配的加法器
+		AdderNbit* adder = new AdderNbit(Nbit);
+		SetOutput(Nbit, adder, Nbit);
+		AddUnit(adder);
+		//3-8解码器
+		//加减乘除，与或，左移右移
+		Mux3to8* decoder = new Mux3to8();
+		AddUnit(decoder);
+		//输入或门
+		OrGateNBit_nInput* OutputGate = new OrGateNBit_nInput(Nbit, 8);//8输入或门，连接8个操作的输出到结果输出
+		AddUnit(OutputGate);
+		for (size_t index = 0; index < Nbit; index++) {
+			SetOutput(index, OutputGate, index);//连接结果输出到8输入与门的输出
+		}
+
+
+		//连接操作码到解码器
+		for (size_t index = 0; index < 3; index++) {
+			SetInput(2 * Nbit + 1 + index, decoder, index);
+		}
+
+		{
+			//加法器处理
+			//输入A ,加减相同
+			for (size_t index = 0; index < Nbit; index++) {
+				SetInput(index, adder, index);//按位连接输入A
+			}
+
+			//输入B,加法直接输入，减法取反输入，进位输入1
+			//3个8位与门来实现输入的选择
+			//1个8位非门来实现B取反
+			AndGateNbit* andGateAdd[2];
+			for (size_t index = 0; index < 2; index++) {
+				andGateAdd[index] = new AndGateNbit(Nbit);
+				AddUnit(andGateAdd[index]);
+			}
+			NotGateNBit* notGate = new NotGateNBit(Nbit);
+			AddUnit(notGate);
+			//1位非处理减法输入和进位输入
+			NotGate* SubNotGate = new NotGate();
+			AddUnit(SubNotGate);
+			decoder->Connect(1, SubNotGate, 0);//连接操作码的第2位到减法非门输入
+			//连接B输入
+			for (size_t index = 0; index < Nbit; index++) {
+				SetInput(index + Nbit, andGateAdd[0], index);//按位连接输入B到第一个与门
+				//连接解码器信号，减法信号对应第二个信号
+				//第一个门对应加法，用非门连接
+				SubNotGate->Connect(0, andGateAdd[0], index + Nbit);
+				SetInput(index + Nbit, notGate, index);//按位连接输入B到非门
+				notGate->Connect(index, andGateAdd[1], index);//连接非门输出到第二个与门
+				decoder->Connect(1, andGateAdd[1], index + Nbit);//连接操作码的第2位到第二个与门输入
+			}
+
+			//1个或门来选择加法器输入，连接两个与门输出到加法器输入
+			OrGateNBit* orGateNbit = new OrGateNBit(Nbit);
+			AddUnit(orGateNbit);
+
+			//连接两个与门输入到加法器输入
+			for (size_t index = 0; index < Nbit; index++) {
+				andGateAdd[0]->Connect(index, orGateNbit, index);
+				andGateAdd[1]->Connect(index, orGateNbit, index + Nbit);
+				orGateNbit->Connect(index, adder, index + Nbit);
+			}
+
+			//连接进位信息
+			//如果是减法，进位输入位1，使用1位或实现 
+			OrGate* orGate = new OrGate();
+			AddUnit(orGate);
+			decoder->Connect(1, orGate, 0);
+			SetInput(2 * Nbit, orGate, 1);
+			orGate->Connect(0, adder, 2 * Nbit);//连接或门输出到加法器的进位输入
+
+			//连接加减法到输出门
+			for (size_t i = 0; i < 2; i++) {
+				AndGateNbit* andGateOp = new AndGateNbit(Nbit);
+				AddUnit(andGateOp);
+				for (size_t index = 0; index < Nbit; index++) {
+					adder->Connect(index, andGateOp, index);
+					andGateOp->Connect(index, OutputGate, index + i * Nbit);
+					decoder->Connect(i, andGateOp, index + Nbit);
+				}
+			}
+		}
+
+		//与或实现
+		//8位与门
+		{
+			AndGateNbit* AndGate = new AndGateNbit(Nbit);
+			AddUnit(AndGate);
+			AndGateNbit* andGateOp = new AndGateNbit(Nbit);
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < Nbit; index++) {
+				SetInput(index, AndGate, index);
+				SetInput(index + Nbit, AndGate, index + Nbit);
+				AndGate->Connect(index, andGateOp, index);
+				decoder->Connect(2, andGateOp, index + Nbit);
+				andGateOp->Connect(index, OutputGate, index + 2 * Nbit);
+			}
+		}
+
+		//8位或门
+		{
+			OrGateNBit* OrGate = new OrGateNBit(Nbit);
+			AddUnit(OrGate);
+			AndGateNbit* andGateOp = new AndGateNbit(Nbit);
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < Nbit; index++) {
+				SetInput(index, OrGate, index);
+				SetInput(index + Nbit, OrGate, index + Nbit);
+				OrGate->Connect(index, andGateOp, index);
+				decoder->Connect(3, andGateOp, index + Nbit);
+				andGateOp->Connect(index, OutputGate, index + 3 * Nbit);
+			}
+
+		}
+
+		//8位非
+		{
+			NotGateNBit* notGate = new NotGateNBit(Nbit);
+			AddUnit(notGate);
+			AndGateNbit* andGateOp = new AndGateNbit(Nbit);
+			AddUnit(andGateOp);
+			for (size_t index = 0; index < Nbit; index++) {
+				SetInput(index, notGate, index);
+				notGate->Connect(index, andGateOp, index);
+				decoder->Connect(4, andGateOp, index + Nbit);
+				andGateOp->Connect(index, OutputGate, index + 4 * Nbit);
+			}
+			//非操作只使用输入A，输入B不连接
+		}
+	}
+
+	void Do() override {
+		Excute();
+	}
+};
+//一个8位总线单元
 class Bus8bit : public Unit {
 public:
 	Bus8bit() :Unit(8, 8) {}

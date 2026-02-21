@@ -1,22 +1,33 @@
 ﻿#include"elec.hpp"
 
 int main() {
-	Adder8bit* adder = new Adder8bit();
-	adder->Input(16) = 0;
-	Measure8bit* measure = new Measure8bit();
-	ManualInput8bitBlock* input1 = new ManualInput8bitBlock();
-	ManualInput8bitBlock* input2 = new ManualInput8bitBlock();
+	ManualInputNbitBlockByBit* input = new ManualInputNbitBlockByBit(16);
+	input->Name = "Op";
+	circuit* c = new circuit();
+	ManualInputNbitBlock* inputA = new ManualInputNbitBlock(16);
+	inputA->Name = "A";
+	ManualInputNbitBlock* inputB = new ManualInputNbitBlock(16);
+	inputB->Name = "B";
+	ALU* alu = new ALU(16);
 
-	for (int i = 0; i < 8; i++) {
-		input1->Connect(i, adder, i);
-		input2->Connect(i, adder, i + 8);
-		adder->Connect(i, measure, i);
+	for (size_t index = 0; index < 16; index++) {
+		inputA->Connect(index, alu, index);
+		inputB->Connect(index, alu, index + 16);
 	}
 
-	circuit cir;
-	cir.AddUnit(input1)
-		.AddUnit(input2)
-		.AddUnit(adder)
-		.AddUnit(measure);
-	cir.Excute();
+	for (size_t index = 0; index < 3; index++) {
+		input->Connect(index + 13, alu, index + 33);
+	}
+
+	SignedMeasureNbit* measure = new SignedMeasureNbit(16);
+	for (size_t index = 0; index < 16; index++) {
+		alu->Connect(index, measure, index);
+	}
+
+	c->AddUnit(inputA).AddUnit(inputB).AddUnit(input)
+		.AddUnit(alu).AddUnit(measure);
+
+	while (1) {
+		c->Excute();
+	}
 }
